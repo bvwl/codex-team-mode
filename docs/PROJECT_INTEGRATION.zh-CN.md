@@ -69,7 +69,240 @@ your-project/
 
 四个标准角色是 `Explorer`、`Executor`、`Complex Executor` 和 `Reviewer`。前端需求不需要预先创建 `frontend` Agent：简单、边界明确的前端修改可以交给 `Executor`，复杂但架构和验收标准已经明确的实现可以交给 `Complex Executor`。如果以后确实需要新的领域角色，应当作为 Team Mode 定制单独设计，同时修改 Skill 路由、Profile 清单和测试；只增加一个同名 TOML 不会自动扩展 Team Mode。
 
-下面每个代码块都是一条独立消息。等上一条完成并检查结果后，再发送下一条。不要把所有消息一次性合并。
+如果当前 Codex 任务提供任务创建与等待工具，推荐先使用下面的“AI 总控模式”：用户只发送一条总控提示词，由 AI 执行第 1～5 步并创建所需的新任务。后面的逐步提示词仍然保留，供工具不可用、发生阻塞或需要人工审计时使用。
+
+### 推荐：让 AI 总控第 1～5 步
+
+AI 可以替用户完成绝大多数操作，包括准备来源、检查 uv、安装文件、创建新的 Codex 任务、发送验证提示词、等待结果和汇总 trace。为了保留必要的安全边界，下面两件事仍可能需要用户亲自确认：
+
+1. **信任 commit**：AI 可以检查和展示 remote、commit 与文件内容，但不能替用户作出“我信任这份代码”的安全决定。AI 必须暂停，等用户明确确认。
+2. **严格只读权限**：AI 先检查任务创建工具的真实 Schema。如果该工具不能为新任务设置 sandbox/权限，AI 不能用提示词假装已经切换为只读；它必须让用户在最终验证任务的输入框下方点选 **Read-only**，然后只需回复“继续”。
+
+把下面整段作为一条消息发送给 Codex。不要提前填写本地路径，也不要手工创建中间任务：
+
+```text
+请作为 Team Mode 项目接入总控，替我执行本文第 1～5 步。
+
+目标：
+- 完成来源审阅、两阶段项目级安装、跨任务运行时验证和最终审计。
+- 不让我复制本地路径、commit、阶段提示词或手工创建中间任务。
+- 只有“信任 commit”和工具无法代设的严格只读权限需要我确认。
+
+开始前先做能力预检：
+1. 检查当前任务是否具备查找项目、创建新任务、等待任务和读取任务结果的真实工具。
+2. 检查任务创建工具的真实输入 Schema，确认它能否指定：
+   - 当前保存的本地项目
+   - local / 当前工作目录环境
+   - sandbox 或权限模式
+3. 新任务必须使用当前保存项目的 local 环境，直接复用当前工作目录。
+   - 不创建 cloud task。
+   - 不创建 projectless task。
+   - 不创建隔离 worktree。
+   - 原因是第一阶段安装的 .codex 和 .agents 文件可能尚未提交，默认分支 worktree 可能看不到它们。
+4. 如果缺少创建或等待新任务的能力，停止自动编排，只告诉我一个当前必须手工完成的动作；不要假装已经刷新运行时。
+
+总控流程：
+
+阶段 A：准备并审阅来源
+1. 在内部解析 PROJECT_ROOT、TEAM_MODE_SOURCE、UV_BIN 和 UV_PROJECT_DIR。
+2. TEAM_MODE_SOURCE 使用 CODEX_HOME/sources/codex-team-mode。
+3. 来源不存在时才允许 clone；已存在时不 pull、不 checkout、不 reset。
+4. 检查预期 GitHub remote、完整 HEAD commit、工作区状态、安装树和 Profile。
+5. 使用项目现有 uv 环境进行冻结、离线、不同步验证。
+6. 报告候选完整 commit SHA 后暂停。
+7. 明确问我是否信任该 commit；在我明确回复信任前不得安装。
+
+阶段 B：第一阶段安装
+1. 收到我的明确信任后，从受信 commit 的 Git blobs 安装四个工作 Profile：
+   - Explorer
+   - Executor
+   - Complex Executor
+   - Reviewer
+2. 不安装 default.toml，不安装 Skill。
+3. 冲突时零写入并一次性报告。
+4. 安装并静态验证完成后，自动创建“Team Mode Profile 选择器验证”新任务。
+5. 新任务必须使用独立的任务上下文；不得用 `spawn_agent`、`fork_turns` 或当前对话中的一条新消息冒充新任务。
+6. 把本文第 3 步的只读验证要求作为新任务初始提示词，然后等待结果。
+
+阶段 C：运行时选择器门槛
+1. 从新任务的真实 spawn_agent Schema 判断是否存在 agent_type 或官方说明的等价 Profile 选择器。
+2. 必须能明确选择：
+   - Explorer
+   - Executor
+   - Complex Executor
+   - Reviewer
+3. 不得用 task_name、message、model、reasoning_effort 或模型自述代替。
+4. 如果失败：
+   - 停止全部后续安装。
+   - 不安装 default.toml 或 Skill。
+   - 报告失败任务、真实 Schema、项目是否可信和下一步。
+5. 只有选择器门槛通过时才继续。
+
+阶段 D：第二阶段安装
+1. 重新核对来源 remote、HEAD、受信 commit 和工作区。
+2. 从受信 commit 的 Git blobs 安装：
+   - agents/default.toml → PROJECT_ROOT/.codex/agents/default.toml
+   - 完整 skills/team-mode 树 → PROJECT_ROOT/.agents/skills/team-mode
+3. 不覆盖不同内容，不修改四个工作 Profile、AGENTS.md 或业务代码。
+4. 验证 Skill 文件树和五个 Profile。
+
+阶段 E：最终激活验证
+1. 自动创建“Team Mode 最终激活验证”新任务，仍使用当前保存项目的 local 环境。
+2. 先让新任务只检查：
+   - $team-mode 是否可发现
+   - 五个 Profile 是否存在并可解析
+   - spawn_agent 是否能选择四个工作 Profile
+   - 父任务当前实际 sandbox
+3. 在确认父任务严格 read-only 以前：
+   - 不启动 Explorer。
+   - 不联网。
+   - 不写文件。
+4. 如果任务创建工具可以明确设置 read-only，就直接使用该字段，并从 trace 复核。
+5. 如果任务创建工具没有权限或 sandbox 字段：
+   - 暂停最终动态验证。
+   - 告诉我打开刚创建的最终验证任务。
+   - 让我在输入框下方选择 Read-only，然后回复“继续”。
+   - 不得把自然语言中的“只读”当作实际权限。
+6. 严格只读确认后，只启动一个最小 Explorer：
+   - agent_type="Explorer"
+   - fork_turns="none"
+   - 只读取项目根目录一级结构
+   - 不联网、不写文件、不启动后代 Agent
+7. 从真实 session trace 核对：
+   - agent_role
+   - model
+   - effort
+   - effective sandbox
+   - depth
+8. 运行 usage_by_model.py --task-id current --by-agent --by-session --audit-routing。
+9. 等待最终验证任务完成，并在总控任务中汇总结果。
+
+全程约束：
+- 不删除文件。
+- 不运行批量删除或递归删除。
+- 不提交、不推送。
+- 不修改业务代码、AGENTS.md、pyproject.toml、uv.lock 或 .venv。
+- 不运行 uv sync、uv lock、uv python install。
+- 不在任何门槛失败后继续下一阶段。
+- 不根据子 Agent 自述判断运行时角色或权限。
+- 每次创建新任务后都报告任务名称和状态。
+```
+
+#### AI 总控模式的预期交互
+
+正常情况下，用户只需要参与下面两次：
+
+```text
+AI：来源已审阅，候选 commit 是 <完整 SHA>。是否明确信任并继续？
+用户：我信任这个 commit，继续。
+
+AI：最终验证任务已创建，但任务创建工具不能代设严格只读权限。
+    请打开“Team Mode 最终激活验证”，在输入框下方选择 Read-only，然后回复“继续”。
+用户：继续。
+```
+
+如果新任务默认已经是严格只读，第二次人工操作也可以省略。AI 必须以真实任务 Schema 和 trace 为准，不能仅根据默认配置或文字提示推断。
+
+### 手工备用：逐步发送第 1～5 步
+
+只有 AI 总控预检发现缺少任务创建/等待能力，或某个阶段需要用户排障时，才需要使用下面的逐步提示词。下面每个代码块都是一条独立消息；等上一条完成并检查结果后，再发送下一条，不要把所有消息一次性合并。
+
+### 小白先看：什么叫“新建任务”
+
+这里的“任务”是同一个项目中的一段独立对话。新任务会继续使用同一个项目目录，但不会沿用旧对话已经固定的运行时工具 Schema。安装新的 Skill 或 Agent Profile 后，必须真的打开一段新对话，不能只在原对话中发送“请重新开始”“刷新配置”或下一步提示词。
+
+下面这些操作**不算**新建任务：
+
+- 继续在当前输入框发送下一条消息。
+- 在当前对话中输入“新建任务”或“重新加载配置”。
+- 刷新当前消息页面后继续原对话。
+- 使用“继续”“恢复”或 `/resume` 打开原对话。
+- 打开不属于当前本地项目的 Quick chat。
+
+#### Codex 桌面端：在同一个项目中新建任务
+
+不同版本的按钮文字可能显示为 **New chat**、**新建任务**、**新建聊天**或 `+`，但操作目标相同：
+
+1. 在左侧栏找到当前业务项目，确认项目名称或目录就是刚才安装 Team Mode 的项目。
+2. 在该项目下点击 **New chat**、**新建任务**或 `+`。如果界面要求选择目录，仍然选择同一个业务项目。
+3. 确认打开的是一个空白对话：旧任务的聊天记录不应出现在新对话正文中，左侧栏应出现一个新的聊天条目。
+4. 不要用 **Quick chat** 代替 **New chat**。当前官方快捷键文档把它们列为两种不同操作；为了确保新任务仍附着到当前本地项目，应使用 **New chat**，并选择同一项目的 **Local** 环境。
+5. 把下一步验证提示词粘贴到这个空白任务中，而不是回到旧任务继续发送。
+
+如果左侧栏被隐藏，先展开左侧栏再操作。项目可以包含多个任务；“新建任务”不会复制项目文件，也不会创建新的 Git 仓库。参见 [ChatGPT desktop app commands](https://learn.chatgpt.com/docs/reference/commands.md) 和 [Codex environments](https://learn.chatgpt.com/docs/environments/modes.md)。
+
+#### 怎样选择严格只读权限
+
+最终激活验证会启动一个最小 Explorer。Explorer 的 TOML 虽然写了 `sandbox_mode = "read-only"`，但子 Agent 仍会继承父任务当前的实时权限，所以必须先把父任务设置为严格只读。
+
+在 Codex 桌面端：
+
+1. 找到消息输入框下方的权限或 sandbox 控件。
+2. 选择明确标示为 **Read-only**、**只读**或说明“不能写入项目”的模式。
+3. 不要把 **Ask for approval**、**Approve for me / Auto-review** 或 **Full access** 当成严格只读；它们控制审批方式，不一定把项目变成不可写。
+4. 新建验证任务后，在发送第 5 步提示词前，再检查一次新任务输入框下方的权限模式。不要假设旧任务的选择一定会自动继承。
+5. 先让 Codex 报告父任务的实际 sandbox；只有 trace 显示 `read-only` 才算通过。
+
+OpenAI 当前文档说明，桌面端权限控件位于输入框下方，CLI 使用 `/permissions`；子 Agent 会继承父任务为当前操作选择的权限模式。参见 [Sandbox](https://learn.chatgpt.com/docs/sandboxing.md) 和 [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents.md#approvals-and-sandbox-controls)。
+
+如果桌面端没有提供明确的只读选项，不要猜。可以改用 Codex CLI：
+
+```text
+1. 从业务项目目录启动 Codex。
+2. 输入 /permissions，选择 Read-only。
+3. 输入 /new，创建同一项目中的新任务。
+4. 粘贴本文第 3 步或第 5 步的验证提示词。
+```
+
+如果桌面端和 CLI 都不能选择只读权限，只能完成静态配置检查，不能宣称动态只读验证通过。
+
+#### 完整操作案例：两次安装、两次新建任务
+
+假设你已经在“任务 A”中完成来源审阅和第一阶段安装：
+
+```text
+任务 A
+  第 1 步：审阅 GitHub 来源
+  第 2 步：安装四个工作 Profile
+  到这里停止，不要在任务 A 中继续第 3 步
+```
+
+接下来：
+
+```text
+新建任务 B（仍然选择同一个业务项目）
+  发送第 3 步提示词
+  检查真实 spawn_agent Schema
+
+  如果没有 agent_type：
+    立即停止
+    不安装 default.toml
+    不安装 Skill
+
+  如果 agent_type 能选择四个工作 Profile：
+    在任务 B 中执行第 4 步
+    安装 default 哨兵和 Skill
+```
+
+第二阶段安装完成后：
+
+```text
+新建任务 C（仍然选择同一个业务项目）
+  在任务 C 的输入框下方选择严格 Read-only
+  发送第 5 步提示词
+  先检查 Skill、五个 Profile、agent_type 和父任务 sandbox
+  四项全部通过后，才允许启动最小 Explorer
+```
+
+可以用下面的现象快速定位问题：
+
+| 现象 | 通常表示什么 | 应该怎么做 |
+| --- | --- | --- |
+| 文件存在，但 `spawn_agent` 没有 `agent_type` | 仍在旧任务，项目配置未加载，或当前任务环境没有该能力 | 重启 Codex 并在同一项目中新建任务；仍然缺失时停止动态验证 |
+| `$team-mode` 可发现，但四个 Profile 不可选 | Skill 已加载，不代表 Agent Profile 已加载 | 检查项目信任状态和真实工具 Schema |
+| trace 显示 `workspace-write` | 父任务不是严格只读 | 新建父任务后，在该任务中选择 Read-only 再发送验证提示词；不要只依赖 Explorer.toml |
+| 左侧栏仍是原聊天记录，输入框继续原上下文 | 没有真正新建任务 | 回到项目，点击 New chat / 新建任务 / `+` |
+| `usage_by_model.py` 仍报告原来的根 session | 验证仍发生在旧任务 | 新建任务后重新执行验证 |
 
 ### 本文采用的 uv 项目约定
 
@@ -193,6 +426,8 @@ EXPECTED_TEAM_MODE_COMMIT：
 
 第一阶段成功后，在同一个业务项目中新建 Codex 任务，再发送：
 
+如果不知道怎样新建任务，先按上面的“小白先看：什么叫‘新建任务’”完成桌面端或 CLI 操作。不要在完成第一阶段安装的旧任务中直接发送下面的提示词。
+
 ```text
 请只读验证当前项目的四个 Team Mode 工作 Profile，不修改文件，不启动子 Agent。
 
@@ -250,6 +485,8 @@ EXPECTED_TEAM_MODE_COMMIT：
 ### 第 5 步：新建任务，做最终激活验证
 
 第二阶段成功后再次新建任务，再发送：
+
+新建任务后、发送下面的验证提示词前，还要在这个新任务中把父任务权限设置为严格只读。只在输入文字中写“不要修改文件”不等于切换了 sandbox；必须使用客户端权限控件或 CLI `/permissions`，并以 trace 中的实际 `read-only` 为准。
 
 ```text
 请验证当前项目的 Team Mode 已完整激活。先只读验证，不修改业务文件。
@@ -769,7 +1006,7 @@ Team Mode 负责“如何分工”，但不知道目标项目真实的构建命�
 
 项目级 Skill 或 Profile 新安装后，建议重启 Codex 或在目标项目中新建任务，再执行只读验证。
 
-验证前在当前 Codex 客户端的任务权限或 sandbox 控件中选择严格只读模式，再新建父任务。不要使用 `workspace-write`、`danger-full-access` 或等价的可写覆盖执行只读验证。若客户端不能显示或控制父任务权限，则不得声称已实现严格只读隔离；只能做静态配置检查，或先把项目放进用户认可的操作系统级只读容器/沙箱。
+新建父任务后、发送验证提示词前，在该任务的权限或 sandbox 控件中选择严格只读模式。不要使用 `workspace-write`、`danger-full-access` 或等价的可写覆盖执行只读验证。若客户端不能显示或控制父任务权限，则不得声称已实现严格只读隔离；只能做静态配置检查，或先把项目放进用户认可的操作系统级只读容器/沙箱。
 
 Profile 的 `read-only` 是默认配置，不能替代父线程实时权限或操作系统级隔离。运行时验证完成后，trace 中的 `effective sandbox` 必须是 `read-only`；否则验证失败。
 
@@ -1228,7 +1465,7 @@ uv 项目先检查项目声明和现有环境：
 
 ### 配置是只读，但实际 sandbox 可写
 
-Profile 的 `sandbox_mode` 可能被父线程实时权限覆盖。应以任务 trace 和 `--audit-routing` 输出为准。需要真正的只读隔离时，在客户端的任务权限或 sandbox 控件中选择严格只读模式并新建父任务；不要保留 `workspace-write`、`danger-full-access` 或等价覆盖。如果客户端无法控制该权限，停止动态只读验证，或改用用户认可的操作系统级只读容器/沙箱。
+Profile 的 `sandbox_mode` 可能被父线程实时权限覆盖。应以任务 trace 和 `--audit-routing` 输出为准。需要真正的只读隔离时，先新建父任务，再在该任务的权限或 sandbox 控件中选择严格只读模式，然后发送验证提示词；不要保留 `workspace-write`、`danger-full-access` 或等价覆盖。如果客户端无法控制该权限，停止动态只读验证，或改用用户认可的操作系统级只读容器/沙箱。
 
 ### 找不到本地 session trace
 
