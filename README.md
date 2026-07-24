@@ -44,7 +44,7 @@ Casual conversation, simple lookups, and tasks whose coordination cost exceeds t
 
 ## Install
 
-The repository management script and full test suite require Python 3.11 or newer.
+The repository management script and full test suite require Python 3.11 or newer. Use the active environment's interpreter: `python` in an activated virtual environment or usually `python3` otherwise. A binary named exactly `python3.11` is not required.
 
 Install the Skill:
 
@@ -57,9 +57,9 @@ The four working Agent profiles and the default-on `default` dispatch guard are 
 When working from this repository, run a no-write preflight before explicitly installing:
 
 ```bash
-python3.11 scripts/manage_profiles.py --scope project
-python3.11 scripts/manage_profiles.py --scope project --apply
-python3.11 scripts/manage_profiles.py --scope project --verify
+python3 scripts/manage_profiles.py --scope project
+python3 scripts/manage_profiles.py --scope project --apply
+python3 scripts/manage_profiles.py --scope project --verify
 ```
 
 Replace `project` with `personal` for a personal installation. The tool never overwrites a same-named file with different content; any conflict stops the installation before a profile is written.
@@ -81,7 +81,7 @@ You do not need to name every agent yourself. The main thread chooses the smalle
 To verify that the current task actually used the expected roles, models, reasoning effort, sandbox, and nesting depth, run:
 
 ```bash
-python3.11 skills/team-mode/scripts/usage_by_model.py \
+python3 skills/team-mode/scripts/usage_by_model.py \
   --task-id current --by-agent --by-session --audit-routing
 ```
 

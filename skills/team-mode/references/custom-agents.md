@@ -65,7 +65,7 @@ Current Codex releases default `agents.max_depth` to `1`; keep that default unle
 ## Install Or Repair
 
 1. Confirm that the user has authorized writing personal or project Codex configuration. Do not silently create global profiles just because a substantial task triggered the Skill.
-2. When working from the repository, run `python3.11 scripts/manage_profiles.py --scope project` or `--scope personal` as a no-write preflight. Inspect every reported destination and conflict.
+2. When working from the repository, use the active Python 3.11-or-newer interpreter to run `python3 scripts/manage_profiles.py --scope project` or `--scope personal` as a no-write preflight; use `python` instead when a compatible virtual environment is active. Do not require a binary named exactly `python3.11`. Inspect every reported destination and conflict.
 3. After authorization, repeat the command with `--apply`. The manager installs only missing files and stops before writing when any same-named destination differs. For a manual installation, apply the same preflight and never overwrite user changes.
 4. Parse every file with Python `tomllib` or an equivalent TOML parser. Confirm that each contains `name`, `description`, and `developer_instructions`, plus the intended model, reasoning effort, and sandbox mode.
 5. Run the manager again with `--verify`, then report the final path and role-to-model mapping. Explain that a personal `default.toml` affects omitted/default subagent dispatches across the user's Codex tasks, while a project-scoped guard affects only that trusted project configuration scope.

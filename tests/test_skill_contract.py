@@ -57,8 +57,9 @@ class TeamModeSkillContractTests(unittest.TestCase):
         self.assertIn("`--audit-routing`", skill)
         self.assertIn("[references/profiles.json](references/profiles.json)", skill)
         self.assertIn("each `session_summary` as one runtime session", skill)
-        self.assertIn("python3.11 skills/team-mode/scripts/usage_by_model.py", skill)
+        self.assertIn("python3 skills/team-mode/scripts/usage_by_model.py", skill)
         self.assertIn("resolve the bundled script relative to this `SKILL.md`", skill)
+        self.assertIn("do not require a binary named exactly `python3.11`", skill)
 
     def test_readmes_document_python_and_safe_profile_preflight(self) -> None:
         for filename in ("README.md", "README.zh-CN.md"):
@@ -67,6 +68,7 @@ class TeamModeSkillContractTests(unittest.TestCase):
                 self.assertIn("Python 3.11", readme)
                 self.assertIn("scripts/manage_profiles.py --scope project", readme)
                 self.assertIn("--audit-routing", readme)
+                self.assertNotIn("python3.11 scripts/", readme)
 
 
 if __name__ == "__main__":

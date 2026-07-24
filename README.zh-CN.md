@@ -44,7 +44,7 @@ TOML 里的 sandbox 是 profile 默认值，不是绝对隔离边界；父线程
 
 ## 安装
 
-本仓库的管理脚本和完整测试要求 Python 3.11 或更高版本。
+本仓库的管理脚本和完整测试要求 Python 3.11 或更高版本。使用当前环境的解释器即可；已激活虚拟环境时使用 `python`，否则通常使用 `python3`，不要求系统存在名为 `python3.11` 的命令。
 
 先安装 Skill：
 
@@ -57,9 +57,9 @@ npx skills add oil-oil/codex-team-mode
 从本仓库安装时，可以先进行不会写文件的安全预检，再显式安装：
 
 ```bash
-python3.11 scripts/manage_profiles.py --scope project
-python3.11 scripts/manage_profiles.py --scope project --apply
-python3.11 scripts/manage_profiles.py --scope project --verify
+python3 scripts/manage_profiles.py --scope project
+python3 scripts/manage_profiles.py --scope project --apply
+python3 scripts/manage_profiles.py --scope project --verify
 ```
 
 个人安装时把 `project` 换成 `personal`。工具不会覆盖内容不同的同名文件；遇到冲突会停止，并且不写入任何 Profile。
@@ -81,7 +81,7 @@ onboarding 完成后，Codex 会主动说明安装了什么，以及怎样只关
 需要核对当前任务是否实际使用了正确角色、模型、推理强度、sandbox 和嵌套深度时，可以运行：
 
 ```bash
-python3.11 skills/team-mode/scripts/usage_by_model.py \
+python3 skills/team-mode/scripts/usage_by_model.py \
   --task-id current --by-agent --by-session --audit-routing
 ```
 

@@ -6,9 +6,18 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import tomllib
 from pathlib import Path
 from typing import Any
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    print(
+        "Team Mode profile management requires Python 3.11 or newer. "
+        "Activate a compatible environment and run this script with its python or python3 command.",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
 
 
 ROOT = Path(__file__).resolve().parents[1]
