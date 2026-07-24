@@ -48,7 +48,25 @@ class TeamModeSkillContractTests(unittest.TestCase):
         self.assertIn("DISPATCH BLOCKED", reference)
         self.assertIn("## Explain How To Disable The Guard", reference)
         self.assertIn("~/.codex/agents-disabled/default.toml", reference)
+        self.assertIn("[profiles.json](profiles.json)", reference)
+        self.assertIn("scripts/manage_profiles.py", reference)
         self.assertNotIn("features enable multi_agent_v2", reference)
+
+    def test_usage_guidance_includes_runtime_routing_audit(self) -> None:
+        skill = (ROOT / "skills" / "team-mode" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("`--audit-routing`", skill)
+        self.assertIn("[references/profiles.json](references/profiles.json)", skill)
+        self.assertIn("each `session_summary` as one runtime session", skill)
+        self.assertIn("python3.11 skills/team-mode/scripts/usage_by_model.py", skill)
+        self.assertIn("resolve the bundled script relative to this `SKILL.md`", skill)
+
+    def test_readmes_document_python_and_safe_profile_preflight(self) -> None:
+        for filename in ("README.md", "README.zh-CN.md"):
+            with self.subTest(filename=filename):
+                readme = (ROOT / filename).read_text(encoding="utf-8")
+                self.assertIn("Python 3.11", readme)
+                self.assertIn("scripts/manage_profiles.py --scope project", readme)
+                self.assertIn("--audit-routing", readme)
 
 
 if __name__ == "__main__":

@@ -44,6 +44,8 @@ TOML 里的 sandbox 是 profile 默认值，不是绝对隔离边界；父线程
 
 ## 安装
 
+本仓库的管理脚本和完整测试要求 Python 3.11 或更高版本。
+
 先安装 Skill：
 
 ```bash
@@ -51,6 +53,16 @@ npx skills add oil-oil/codex-team-mode
 ```
 
 四个工作 Agent 配置和默认开启的 `default` 派发哨兵与 Skill 分开安装。个人使用时，把 [`agents/`](./agents) 里的五个 TOML 模板复制到 `~/.codex/agents/`；只给单个项目使用时，复制到 `<repository>/.codex/agents/`。onboarding 只在首次配置、Profile 缺失，或用户明确要求修复与验证时运行一次。
+
+从本仓库安装时，可以先进行不会写文件的安全预检，再显式安装：
+
+```bash
+python3.11 scripts/manage_profiles.py --scope project
+python3.11 scripts/manage_profiles.py --scope project --apply
+python3.11 scripts/manage_profiles.py --scope project --verify
+```
+
+个人安装时把 `project` 换成 `personal`。工具不会覆盖内容不同的同名文件；遇到冲突会停止，并且不写入任何 Profile。
 
 准确文件名、安全安装、验证、修复和模型调整都写在 [自定义 Agent 配置说明](./skills/team-mode/references/custom-agents.md) 里。如果安装后没有立即显示新的 Agent，可以新建一个 Codex 任务或重启 Codex。
 
@@ -66,6 +78,13 @@ onboarding 完成后，Codex 会主动说明安装了什么，以及怎样只关
 
 用户不用逐个指定 Agent。主线程会选择够用的最小团队，并对汇总后的结果负责。
 
+需要核对当前任务是否实际使用了正确角色、模型、推理强度、sandbox 和嵌套深度时，可以运行：
+
+```bash
+python3.11 skills/team-mode/scripts/usage_by_model.py \
+  --task-id current --by-agent --by-session --audit-routing
+```
+
 ## 自定义
 
 你可以修改 `agents/*.toml` 中的 `model` 和 `model_reasoning_effort`。角色边界建议保留：Explorer 和 Reviewer 只读，修改权限只交给执行者，新的复审使用全新上下文，最终验收留在主线程。
@@ -78,9 +97,10 @@ codex-team-mode/
 ├── assets/readme/           # GitHub-safe SVG 视觉素材
 ├── skills/team-mode/        # 可以安装的 Skill
 │   ├── agents/openai.yaml
-│   ├── references/         # Agent 配置与评估方法
+│   ├── references/         # Profile 清单、Agent 配置与评估方法
 │   ├── scripts/usage_by_model.py
 │   └── SKILL.md
+├── scripts/manage_profiles.py # 安全预检、安装和验证 Profile
 ├── tests/                   # Agent、路由与用量回归测试
 ├── LICENSE
 └── README.md

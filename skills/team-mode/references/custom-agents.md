@@ -28,6 +28,8 @@ Use these exact profile names and recommended defaults:
 - `Reviewer`（复审者）: `gpt-5.6-sol`, `high`, `read-only`.
 - `default`（派发哨兵）: `gpt-5.6-terra`, `low`, `read-only`; it refuses every task and tells the parent to respawn with an explicit working profile.
 
+The machine-readable source for this mapping is [profiles.json](profiles.json). Keep the TOML templates, runtime audit, tests, and user-facing tables consistent with it.
+
 The guard is not a fifth working role. Codex selects it only when the parent omits `agent_type` or explicitly passes `default`. Its low-cost model minimizes the cost of a routing mistake. Each profile's explicit `model` and `model_reasoning_effort` override the parent for that child only; installing the Terra Low guard does not change a Sol XHigh main thread.
 
 These model IDs are repository defaults verified in the intended installation. Terra High is the default substantial executor because the main thread retains architecture decisions and final acceptance; Sol High remains the independent review tier for concrete consequential risks. If a configured model is unavailable, ask before substituting another model, preserve the role boundary, and verify the actual runtime trace after the change.
@@ -63,10 +65,10 @@ Current Codex releases default `agents.max_depth` to `1`; keep that default unle
 ## Install Or Repair
 
 1. Confirm that the user has authorized writing personal or project Codex configuration. Do not silently create global profiles just because a substantial task triggered the Skill.
-2. Inspect the destination directory first. Preserve unrelated profiles. If a same-named file already exists, compare it with the template and ask before replacing user changes.
-3. Copy the five canonical TOML templates to the selected Agent directory with the exact filenames above. The four named working profiles perform tasks; `default.toml` only blocks invalid dispatches.
+2. When working from the repository, run `python3.11 scripts/manage_profiles.py --scope project` or `--scope personal` as a no-write preflight. Inspect every reported destination and conflict.
+3. After authorization, repeat the command with `--apply`. The manager installs only missing files and stops before writing when any same-named destination differs. For a manual installation, apply the same preflight and never overwrite user changes.
 4. Parse every file with Python `tomllib` or an equivalent TOML parser. Confirm that each contains `name`, `description`, and `developer_instructions`, plus the intended model, reasoning effort, and sandbox mode.
-5. Report the final path and role-to-model mapping. Explain that a personal `default.toml` affects omitted/default subagent dispatches across the user's Codex tasks, while a project-scoped guard affects only that trusted project configuration scope.
+5. Run the manager again with `--verify`, then report the final path and role-to-model mapping. Explain that a personal `default.toml` affects omitted/default subagent dispatches across the user's Codex tasks, while a project-scoped guard affects only that trusted project configuration scope.
 6. Explain the reversible guard controls below. Do not disable, move, or delete anything unless the user asks.
 7. If the new profiles do not appear immediately, tell the user to open a new Codex task or restart Codex.
 

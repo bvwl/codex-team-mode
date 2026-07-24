@@ -1,23 +1,26 @@
 from __future__ import annotations
 
+import json
 import tomllib
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).parents[1]
-PROFILES = {
-    "default.toml": ("default", "gpt-5.6-terra", "low", "read-only"),
-    "Explorer.toml": ("Explorer", "gpt-5.6-luna", "medium", "read-only"),
-    "Executor.toml": ("Executor", "gpt-5.6-luna", "high", "workspace-write"),
-    "Complex Executor.toml": ("Complex Executor", "gpt-5.6-terra", "high", "workspace-write"),
-    "Reviewer.toml": ("Reviewer", "gpt-5.6-sol", "high", "read-only"),
-}
+MANIFEST_PATH = ROOT / "skills" / "team-mode" / "references" / "profiles.json"
+MANIFEST = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+PROFILES = MANIFEST["profiles"]
 
 
 class AgentProfileTests(unittest.TestCase):
     def test_profile_boundaries_and_models_are_explicit(self) -> None:
-        for filename, expected in PROFILES.items():
+        self.assertEqual(
+            set(PROFILES),
+            {"default", "Explorer", "Executor", "Complex Executor", "Reviewer"},
+        )
+        self.assertFalse(PROFILES["default"]["working_role"])
+        for name, expected in PROFILES.items():
+            filename = expected["filename"]
             with self.subTest(filename=filename):
                 data = tomllib.loads((ROOT / "agents" / filename).read_text(encoding="utf-8"))
                 actual = (
@@ -26,7 +29,10 @@ class AgentProfileTests(unittest.TestCase):
                     data["model_reasoning_effort"],
                     data["sandbox_mode"],
                 )
-                self.assertEqual(actual, expected)
+                self.assertEqual(
+                    actual,
+                    (name, expected["model"], expected["effort"], expected["sandbox"]),
+                )
                 if filename != "default.toml":
                     self.assertIn(
                         "Do not spawn subagents; return evidence or blockers to the parent.",

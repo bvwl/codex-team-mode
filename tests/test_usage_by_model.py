@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
 import importlib.util
 import json
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -252,6 +254,156 @@ class UsageByModelTests(unittest.TestCase):
             details = usage_by_model.session_rows(sessions)
             self.assertEqual({row["effort"] for row in details}, {"high", "xhigh"})
             self.assertEqual(len(details), 2)
+            summaries = usage_by_model.summarize_sessions(details)
+            self.assertEqual(len(summaries), 1)
+            self.assertEqual(summaries[0]["session_id"], "task-mixed")
+            self.assertEqual(len(summaries[0]["usage_segments"]), 2)
+
+    def test_json_status_counts_each_multi_effort_session_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "2026" / "07" / "17" / "mixed-complete.jsonl"
+            path.parent.mkdir(parents=True)
+            payload = {
+                "id": "mixed-complete",
+                "session_id": "mixed-complete",
+                "cwd": "/workspace",
+            }
+            first = {"input_tokens": 100, "cached_input_tokens": 50, "output_tokens": 10}
+            second = {"input_tokens": 200, "cached_input_tokens": 100, "output_tokens": 20}
+            path.write_text(
+                event("session_meta", payload)
+                + event("turn_context", {"model": "gpt-5.6-sol", "effort": "high"})
+                + event("event_msg", {"type": "token_count", "info": {"last_token_usage": first}})
+                + event("turn_context", {"model": "gpt-5.6-sol", "effort": "xhigh"})
+                + event("event_msg", {"type": "token_count", "info": {"last_token_usage": second}})
+                + event("event_msg", {"type": "task_complete"}),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            argv = [
+                str(SCRIPT),
+                "--task-id",
+                "mixed-complete",
+                "--sessions-root",
+                str(root),
+                "--json",
+            ]
+            with mock.patch.object(sys, "argv", argv), redirect_stdout(output):
+                result = usage_by_model.main()
+
+            report = json.loads(output.getvalue())
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                report["session_status_counts"],
+                {"completed": 1, "interrupted": 0, "incomplete": 0},
+            )
+            self.assertEqual(len(report["session_summaries"]), 1)
+            self.assertEqual(len(report["session_summaries"][0]["usage_segments"]), 2)
+
+    def test_malformed_event_shapes_and_invalid_usage_are_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "2026" / "07" / "17" / "malformed.jsonl"
+            path.parent.mkdir(parents=True)
+            payload = {"id": "malformed", "session_id": "malformed", "cwd": "/workspace"}
+            path.write_text(
+                event("session_meta", payload)
+                + event("turn_context", {"model": "gpt-5.6-sol", "effort": "high"})
+                + json.dumps({"type": "event_msg", "payload": ["not", "an", "object"]}) + "\n"
+                + event(
+                    "event_msg",
+                    {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 2,
+                                "cached_input_tokens": 3,
+                                "output_tokens": 1,
+                            }
+                        },
+                    },
+                ),
+                encoding="utf-8",
+            )
+
+            by_model, _, _, _, included, malformed, _ = usage_by_model.scan(
+                root, None, "malformed"
+            )
+            self.assertEqual(included, 1)
+            self.assertEqual(malformed, 2)
+            self.assertEqual(by_model["gpt-5.6-sol"]["events"], 0)
+
+    def test_routing_audit_checks_profile_runtime_and_depth(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_trace(
+                root,
+                "child.jsonl",
+                session_id="child",
+                task_id="root",
+                role="Explorer",
+                agent_path="/root/child",
+                model="gpt-5.6-terra",
+                effort="high",
+                input_tokens=10,
+                cached_tokens=0,
+                output_tokens=2,
+                parent_thread_id="missing-parent",
+                sandbox="workspace-write",
+            )
+            _, _, sessions, *_ = usage_by_model.scan(root, None, "root")
+            details = usage_by_model.session_rows(sessions)
+            audit = usage_by_model.audit_routing(
+                details, usage_by_model.load_profile_manifest()
+            )
+            codes = {finding["code"] for finding in audit["findings"]}
+            self.assertEqual(audit["verdict"], "fail")
+            self.assertIn("model_mismatch", codes)
+            self.assertIn("effort_mismatch", codes)
+            self.assertIn("readonly_boundary_mismatch", codes)
+
+    def test_routing_audit_passes_matching_direct_child(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_trace(
+                root,
+                "root.jsonl",
+                session_id="root",
+                task_id="root",
+                role=None,
+                agent_path=None,
+                model="gpt-5.6-sol",
+                effort="high",
+                input_tokens=10,
+                cached_tokens=0,
+                output_tokens=2,
+            )
+            write_trace(
+                root,
+                "child.jsonl",
+                session_id="child",
+                task_id="root",
+                role="Explorer",
+                agent_path="/root/child",
+                model="gpt-5.6-luna",
+                effort="medium",
+                input_tokens=10,
+                cached_tokens=0,
+                output_tokens=2,
+                parent_thread_id="root",
+                sandbox="read-only",
+            )
+            _, _, sessions, *_ = usage_by_model.scan(root, None, "root")
+            audit = usage_by_model.audit_routing(
+                usage_by_model.session_rows(sessions),
+                usage_by_model.load_profile_manifest(),
+            )
+            self.assertEqual(audit, {
+                "verdict": "pass",
+                "counts": {"error": 0, "warning": 0},
+                "findings": [],
+            })
 
     def test_runtime_status_timestamps_sandbox_and_depth(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

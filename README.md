@@ -44,6 +44,8 @@ Casual conversation, simple lookups, and tasks whose coordination cost exceeds t
 
 ## Install
 
+The repository management script and full test suite require Python 3.11 or newer.
+
 Install the Skill:
 
 ```bash
@@ -51,6 +53,16 @@ npx skills add oil-oil/codex-team-mode
 ```
 
 The four working Agent profiles and the default-on `default` dispatch guard are separate from the Skill. Copy the five TOML templates in [`agents/`](./agents) to `~/.codex/agents/` for personal use or `<repository>/.codex/agents/` for one project. Onboarding runs only for first setup, missing profiles, or explicit repair and verification requests.
+
+When working from this repository, run a no-write preflight before explicitly installing:
+
+```bash
+python3.11 scripts/manage_profiles.py --scope project
+python3.11 scripts/manage_profiles.py --scope project --apply
+python3.11 scripts/manage_profiles.py --scope project --verify
+```
+
+Replace `project` with `personal` for a personal installation. The tool never overwrites a same-named file with different content; any conflict stops the installation before a profile is written.
 
 See [Custom Agent Profiles](./skills/team-mode/references/custom-agents.md) for exact filenames, safe installation, validation, repair, and model customization. Open a new Codex task or restart Codex if newly installed profiles do not appear immediately.
 
@@ -66,6 +78,13 @@ Use $team-mode for this task. Start the smallest useful team and keep unresolved
 
 You do not need to name every agent yourself. The main thread chooses the smallest useful team and remains responsible for the combined result.
 
+To verify that the current task actually used the expected roles, models, reasoning effort, sandbox, and nesting depth, run:
+
+```bash
+python3.11 skills/team-mode/scripts/usage_by_model.py \
+  --task-id current --by-agent --by-session --audit-routing
+```
+
 ## Customize
 
 You can change `model` and `model_reasoning_effort` in `agents/*.toml`. Preserve the role boundaries: Explorer and Reviewer stay read-only, mutation permissions remain with the executors, new reviews use fresh context, and final acceptance stays with the main thread.
@@ -78,9 +97,10 @@ codex-team-mode/
 ├── assets/readme/           # GitHub-safe SVG visuals
 ├── skills/team-mode/        # Installable Skill
 │   ├── agents/openai.yaml
-│   ├── references/         # Profile setup and evaluation guidance
+│   ├── references/         # Profile manifest, setup, and evaluation guidance
 │   ├── scripts/usage_by_model.py
 │   └── SKILL.md
+├── scripts/manage_profiles.py # Safe profile preflight, install, and verification
 ├── tests/                   # Agent, routing, and usage regression tests
 ├── LICENSE
 └── README.md

@@ -20,6 +20,7 @@ RATES = {
     "gpt-5.6-terra": {"input": 62.5, "cached": 6.25, "output": 375.0},
     "gpt-5.6-sol": {"input": 125.0, "cached": 12.5, "output": 750.0},
 }
+PROFILE_MANIFEST = Path(__file__).resolve().parents[1] / "references" / "profiles.json"
 
 
 def default_sessions_root() -> Path:
@@ -42,6 +43,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     parser.add_argument("--by-agent", action="store_true", help="Also group usage by custom Agent role.")
     parser.add_argument("--by-session", action="store_true", help="Also show each root or subagent session separately.")
+    parser.add_argument(
+        "--audit-routing",
+        action="store_true",
+        help="Check child role, model, effort, sandbox, and nesting against the bundled profile manifest.",
+    )
     parser.add_argument("--sessions-root", type=Path, default=default_sessions_root(), help="Override the sessions directory.")
     args = parser.parse_args()
     if not args.all and args.days < 1:
@@ -51,6 +57,29 @@ def parse_args() -> argparse.Namespace:
         if not args.task_id:
             parser.error("--task-id current requires CODEX_THREAD_ID")
     return args
+
+
+def load_profile_manifest(path: Path = PROFILE_MANIFEST) -> dict[str, dict[str, Any]]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("schema_version") != 1 or not isinstance(data.get("profiles"), dict):
+        raise ValueError(f"Unsupported or malformed profile manifest: {path}")
+    profiles = data["profiles"]
+    required = {"filename", "working_role", "model", "effort", "sandbox"}
+    for name, expected in profiles.items():
+        if not isinstance(expected, dict):
+            raise ValueError(f"Profile manifest entry must be an object: {name}")
+        missing = required - expected.keys()
+        if missing:
+            raise ValueError(f"Profile manifest entry {name!r} is missing: {sorted(missing)}")
+        filename = expected["filename"]
+        if not isinstance(filename, str) or Path(filename).name != filename:
+            raise ValueError(f"Profile manifest entry {name!r} has an unsafe filename")
+        for field in ("model", "effort", "sandbox"):
+            if not isinstance(expected[field], str) or not expected[field]:
+                raise ValueError(f"Profile manifest entry {name!r} has an invalid {field}")
+        if not isinstance(expected["working_role"], bool):
+            raise ValueError(f"Profile manifest entry {name!r} has an invalid working_role")
+    return profiles
 
 
 def session_date(path: Path, root: Path) -> date:
@@ -91,9 +120,15 @@ def read_trace_metadata(path: Path) -> tuple[dict[str, Any], int]:
             except json.JSONDecodeError:
                 malformed += 1
                 continue
+            if not isinstance(event, dict):
+                malformed += 1
+                continue
             if event.get("type") != "session_meta":
                 continue
-            payload = event.get("payload") or {}
+            payload = event.get("payload")
+            if not isinstance(payload, dict):
+                malformed += 1
+                continue
             spawn = nested_spawn(payload)
             session_id = payload.get("id") or path.stem
             parent_thread_id = payload.get("parent_thread_id") or spawn.get("parent_thread_id")
@@ -199,12 +234,30 @@ def blank_usage() -> dict[str, int]:
     return {"events": 0, "input": 0, "cached": 0, "output": 0, "reasoning": 0}
 
 
-def add_usage(target: dict[str, int], usage: dict[str, Any]) -> None:
+def add_usage(target: dict[str, int], usage: Any) -> bool:
+    if not isinstance(usage, dict):
+        return False
+    parsed: dict[str, int] = {}
+    for field in (
+        "input_tokens",
+        "cached_input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens",
+    ):
+        value = usage.get(field, 0)
+        if value is None:
+            value = 0
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return False
+        parsed[field] = value
+    if parsed["cached_input_tokens"] > parsed["input_tokens"]:
+        return False
     target["events"] += 1
-    target["input"] += int(usage.get("input_tokens") or 0)
-    target["cached"] += int(usage.get("cached_input_tokens") or 0)
-    target["output"] += int(usage.get("output_tokens") or 0)
-    target["reasoning"] += int(usage.get("reasoning_output_tokens") or 0)
+    target["input"] += parsed["input_tokens"]
+    target["cached"] += parsed["cached_input_tokens"]
+    target["output"] += parsed["output_tokens"]
+    target["reasoning"] += parsed["reasoning_output_tokens"]
+    return True
 
 
 def merge_usage(target: dict[str, int], source: dict[str, int]) -> None:
@@ -259,7 +312,15 @@ def scan(
                     if seen_metadata:
                         malformed_lines += 1
                     continue
-                payload = event.get("payload") or {}
+                if not isinstance(event, dict):
+                    if seen_metadata:
+                        malformed_lines += 1
+                    continue
+                payload = event.get("payload")
+                if not isinstance(payload, dict):
+                    if seen_metadata:
+                        malformed_lines += 1
+                    continue
                 timestamp = parse_timestamp(event.get("timestamp") or payload.get("timestamp"))
                 if timestamp:
                     timestamps.append(timestamp)
@@ -267,7 +328,7 @@ def scan(
                     seen_metadata = True
                 elif event.get("type") == "turn_context":
                     model = payload.get("model") or model
-                    effort = payload.get("effort")
+                    effort = payload.get("effort") or effort
                     sandbox = payload.get("sandbox_policy")
                     if isinstance(sandbox, dict):
                         sandbox = sandbox.get("type")
@@ -291,9 +352,13 @@ def scan(
                     and payload.get("type") == "token_count"
                     and model
                 ):
-                    usage = ((payload.get("info") or {}).get("last_token_usage"))
-                    if usage:
-                        add_usage(usage_by_segment[(model, effort)], usage)
+                    info = payload.get("info")
+                    if not isinstance(info, dict):
+                        malformed_lines += 1
+                        continue
+                    usage = info.get("last_token_usage")
+                    if usage is not None and not add_usage(usage_by_segment[(model, effort)], usage):
+                        malformed_lines += 1
         role = trace["agent_role"]
         started = min(timestamps) if timestamps else None
         ended = max(timestamps) if timestamps else None
@@ -433,6 +498,147 @@ def session_rows(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return add_credit_shares(result)
 
 
+def summarize_sessions(data: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse model/effort usage segments into one runtime record per session."""
+    summaries: dict[str, dict[str, Any]] = {}
+    for row in data:
+        session_id = row["session_id"]
+        summary = summaries.get(session_id)
+        if summary is None:
+            summary = {
+                "session_id": session_id,
+                "task_id": row["task_id"],
+                "parent_thread_id": row["parent_thread_id"],
+                "agent_role": row["agent_role"],
+                "agent_path": row["agent_path"],
+                "cwd": row["cwd"],
+                "started_at": row.get("started_at"),
+                "ended_at": row.get("ended_at"),
+                "elapsed_seconds": row.get("elapsed_seconds"),
+                "terminal_status": row.get("terminal_status", "incomplete"),
+                "task_complete_seen": row.get("final_report_present", False),
+                "interrupted_count": row.get("interrupted_count", 0),
+                "effective_sandbox": row.get("effective_sandbox", []),
+                "approval_policy": row.get("approval_policy", []),
+                "depth": row.get("depth", 0),
+                "usage_segments": [],
+            }
+            summaries[session_id] = summary
+        summary["usage_segments"].append({
+            "model": row["model"],
+            "effort": row["effort"],
+            "total_processed_tokens": row["total_processed_tokens"],
+            "estimated_standard_credits": row["estimated_standard_credits"],
+        })
+    return sorted(
+        summaries.values(),
+        key=lambda row: (row["agent_path"] or "/root", row["session_id"]),
+    )
+
+
+def audit_routing(
+    session_details: list[dict[str, Any]],
+    profiles: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    findings: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def add(severity: str, code: str, row: dict[str, Any], message: str) -> None:
+        key = (row["session_id"], code, message)
+        if key in seen:
+            return
+        seen.add(key)
+        findings.append({
+            "severity": severity,
+            "code": code,
+            "session_id": row["session_id"],
+            "agent_role": row["agent_role"],
+            "agent_path": row["agent_path"],
+            "message": message,
+        })
+
+    for row in session_details:
+        role = row["agent_role"]
+        if role == "main":
+            continue
+        if row.get("depth", 0) > 1:
+            add(
+                "error",
+                "nested_subagent",
+                row,
+                f"subagent depth is {row['depth']}; Team Mode allows direct children only",
+            )
+        if role == "subagent/unknown":
+            add(
+                "warning",
+                "unknown_agent_role",
+                row,
+                "child role is unknown; this may be a guard probe or an omitted agent_type",
+            )
+            continue
+        expected = profiles.get(role)
+        if expected is None:
+            add("error", "unrecognized_agent_role", row, f"role {role!r} is not in the profile manifest")
+            continue
+        if role == "default":
+            add(
+                "error",
+                "dispatch_guard_selected",
+                row,
+                "default is a dispatch guard and must not perform working-agent tasks",
+            )
+        if row["model"] != expected["model"]:
+            add(
+                "error",
+                "model_mismatch",
+                row,
+                f"model is {row['model']!r}; expected {expected['model']!r}",
+            )
+        if row["effort"] != expected["effort"]:
+            add(
+                "error",
+                "effort_mismatch",
+                row,
+                f"effort is {row['effort']!r}; expected {expected['effort']!r}",
+            )
+        sandboxes = set(row.get("effective_sandbox") or [])
+        if not sandboxes:
+            add(
+                "warning",
+                "sandbox_unobserved",
+                row,
+                "no effective sandbox was observed in local turn_context events",
+            )
+        elif "danger-full-access" in sandboxes:
+            add(
+                "error",
+                "danger_full_access",
+                row,
+                "effective sandbox includes danger-full-access",
+            )
+        elif expected["sandbox"] == "read-only" and sandboxes != {"read-only"}:
+            add(
+                "error",
+                "readonly_boundary_mismatch",
+                row,
+                f"effective sandbox is {sorted(sandboxes)!r}; expected read-only",
+            )
+        elif expected["sandbox"] not in sandboxes:
+            add(
+                "warning",
+                "sandbox_mismatch",
+                row,
+                f"effective sandbox is {sorted(sandboxes)!r}; profile default is {expected['sandbox']!r}",
+            )
+
+    counts = {
+        severity: sum(1 for finding in findings if finding["severity"] == severity)
+        for severity in ("error", "warning")
+    }
+    verdict = "fail" if counts["error"] else ("warn" if counts["warning"] else "pass")
+    return {"verdict": verdict, "counts": counts, "findings": findings}
+
+
 def print_table(title: str, data: list[dict[str, Any]]) -> None:
     print(title)
     print(
@@ -477,7 +683,7 @@ def print_table(title: str, data: list[dict[str, Any]]) -> None:
 
 
 def print_session_table(data: list[dict[str, Any]]) -> None:
-    print("By session")
+    print("By session / model segment")
     print(
         f"{'Role / Model':<26} {'Agent path':<22} {'Status':<11} {'Elapsed':>8} "
         f"{'Sandbox':<16} {'Processed':>11} {'Uncached':>10} {'Cached':>10} {'Output':>9} {'Credits*':>10}"
@@ -493,6 +699,20 @@ def print_session_table(data: list[dict[str, Any]]) -> None:
             f"{row.get('terminal_status', 'incomplete'):<11} {elapsed:>8} {sandbox:<16} "
             f"{row['total_processed_tokens']:>11,} {row['uncached_input_tokens']:>10,} "
             f"{row['cached_input_tokens']:>10,} {row['output_tokens']:>9,} {credits_text:>10}"
+        )
+    print()
+
+
+def print_routing_audit(audit: dict[str, Any]) -> None:
+    counts = audit["counts"]
+    print(
+        f"Routing audit: {audit['verdict'].upper()} · "
+        f"{counts['error']} error(s) · {counts['warning']} warning(s)"
+    )
+    for finding in audit["findings"]:
+        print(
+            f"- {finding['severity'].upper()} {finding['code']} "
+            f"[{finding['agent_path'] or finding['session_id']}]: {finding['message']}"
         )
     print()
 
@@ -538,7 +758,15 @@ def main() -> int:
     model_rows = rows(by_model)
     agent_rows = rows(by_agent) if args.by_agent else []
     all_session_details = session_rows(sessions)
+    session_summaries = summarize_sessions(all_session_details)
     detailed_sessions = all_session_details if args.by_session else []
+    routing_audit = None
+    if args.audit_routing:
+        try:
+            routing_audit = audit_routing(all_session_details, load_profile_manifest())
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            print(f"Cannot load profile manifest: {exc}", file=sys.stderr)
+            return 2
     if resolved_task_id:
         period = f"task {resolved_task_id}"
     else:
@@ -549,9 +777,9 @@ def main() -> int:
         "Account limits and resets remain authoritative in Codex /usage.",
         "Runtime fields come from local trace events; completed means only that the session has task_complete, not that artifact quality is assured.",
     ]
-    status_counts = {status: sum(1 for row in all_session_details if row.get("terminal_status") == status)
+    status_counts = {status: sum(1 for row in session_summaries if row.get("terminal_status") == status)
                      for status in ("completed", "interrupted", "incomplete")}
-    max_depth = max((row.get("depth", 0) for row in all_session_details), default=0)
+    max_depth = max((row.get("depth", 0) for row in session_summaries), default=0)
 
     if args.json:
         print(json.dumps({
@@ -569,8 +797,10 @@ def main() -> int:
             "models": model_rows,
             "agents": agent_rows,
             "sessions": detailed_sessions,
+            "session_summaries": session_summaries,
             "session_status_counts": status_counts,
             "max_subagent_depth": max_depth,
+            "routing_audit": routing_audit,
             "limitations": limitations,
         }, ensure_ascii=False, indent=2))
         return 0
@@ -584,6 +814,8 @@ def main() -> int:
         print_table("By Agent role", agent_rows)
     if args.by_session:
         print_session_table(detailed_sessions)
+    if routing_audit is not None:
+        print_routing_audit(routing_audit)
     print_rate_card()
     print(f"Rate source: {RATE_SOURCE}")
     print("* Tok/Credit is the observed processed-token ratio for that row, not a universal conversion. ")
