@@ -96,7 +96,7 @@ uv venv
 
 ### 第 1 步：让 Codex 从 GitHub 准备并审阅来源
 
-先在 Codex 中打开真正要接入的业务项目，然后直接发送下面的消息。它不包含个人目录或必须手工替换的来源路径：Codex 会先判断标准来源目录是否已经存在；没有时才从 GitHub 克隆。它不得扫描、列出或猜测其他用户目录。
+先在 Codex 中打开真正要接入的业务项目，然后直接发送下面的消息。它不包含个人目录或必须手工替换的来源路径：Codex 会把来源仓库放在自己的统一源码缓存 `CODEX_HOME/sources/codex-team-mode`，不会放进业务项目或业务项目的同级目录。这里使用的是跨平台逻辑位置，macOS、Linux 和 Windows 都必须通过当前操作系统的原生路径规则解析，不能把斜杠、盘符或某台机器的用户目录硬编码进去。首次不存在时才从 GitHub 克隆，后续项目复用同一份来源。它不得扫描、列出或猜测其他用户目录，也不得在回复中显示用户主目录的完整绝对路径。
 
 ```text
 我想把 GitHub 上的 Team Mode 接入当前项目。现在只准备和审阅安装来源，不安装 Skill 或 Agent，不修改当前项目，不启动子 Agent。
@@ -105,57 +105,56 @@ GitHub 仓库：
 https://github.com/bvwl/codex-team-mode.git
 
 请执行：
-1. 确认当前业务项目的根目录并报告绝对路径。
+1. 在内部确认当前业务项目根目录并记为 PROJECT_ROOT；回复中只报告“已识别”或阻塞原因，不显示完整绝对路径。
 2. 确定本地来源目录：
    - 如果我在当前任务中已经明确提供 TEAM_MODE_SOURCE，使用该路径。
-   - 否则把 TEAM_MODE_SOURCE 定义为 PROJECT_ROOT 的同级目录 codex-team-mode-source。
-   - 只解析并报告最终绝对路径，不扫描、搜索或列出其他用户目录。
+   - 否则先解析 Codex 配置根目录：优先使用已经设置且非空的 CODEX_HOME；未设置时使用当前用户主目录下的 .codex。
+   - macOS/Linux 的默认语义是 $HOME/.codex；Windows 的默认语义是 %USERPROFILE%\.codex。它们只是说明默认规则，不得直接作为未经展开的字符串传给文件或 Git 命令。
+   - 使用当前运行时的原生路径 API 拼接 sources 和 codex-team-mode，规范化为绝对路径后记为 TEAM_MODE_SOURCE；不要手工拼接 / 或 \，不要假设盘符，也不要调用只适用于某一种 Shell 的变量展开语法。
+   - TEAM_MODE_SOURCE 的跨平台逻辑位置记作 CODEX_HOME/sources/codex-team-mode。它必须位于业务项目之外，不得放入 PROJECT_ROOT 或 PROJECT_ROOT 的同级目录。
+   - 在内部解析并保存真实绝对路径，供后续步骤复用；回复中只写逻辑位置 CODEX_HOME/sources/codex-team-mode，不显示用户主目录或完整绝对路径。
+   - 不扫描、搜索或列出其他用户目录。
 3. 检查 TEAM_MODE_SOURCE 是否已经存在：
-   - 不存在：我授权你只在这个精确路径执行一次 git clone，从上述 GitHub URL 拉取仓库。
+   - 不存在：我授权你使用当前平台的原生文件 API，只创建缺失的 CODEX_HOME/sources 目录，并以独立参数把精确的 TEAM_MODE_SOURCE 路径传给 git clone，从上述 GitHub URL 克隆仓库。
    - 已存在且是 Git 仓库：不 pull、不 checkout、不 reset、不覆盖；只检查它是否为预期仓库。
-   - 已存在但不是 Git 仓库，或 remote 不是预期 URL：停止，不覆盖、不移动、不删除任何内容。
+   - 已存在但不是 Git 仓库、是符号链接或 Windows 重解析点，或者 remote 不是预期 URL：停止，不覆盖、不移动、不删除任何内容。
 4. 报告来源仓库的 remote、完整 HEAD commit SHA 和完整工作区状态。
 5. 检查 HEAD 中的 skills/team-mode、scripts/manage_profiles.py 和 agents/*.toml，说明它们分别会安装什么。
 6. 检查当前任务真实的 spawn_agent 输入 Schema，列出全部字段；不要启动子 Agent。
 7. 检查业务项目是否使用 uv：
    - 查找 pyproject.toml、uv.lock 和 .python-version，确定真实的 UV_PROJECT_DIR。
-   - 报告 uv 可执行文件的绝对路径，记为 UV_BIN。
+   - 在内部解析 uv 可执行文件的绝对路径并记为 UV_BIN，不在回复中显示完整路径。
    - 从 .python-version 和 pyproject.toml 的 requires-python 读取项目声明的 Python 版本。
    - 确认项目 uv 环境已经初始化，然后使用 uv run --project UV_PROJECT_DIR 执行 Python；不要让用户手工选择系统 Python。
    - 使用 --frozen、--no-sync、--no-python-downloads、--offline 和 --no-env-file，保证检查不会同步依赖、更新锁文件、下载 Python 或加载 .env。
    - 只检查现有环境，不运行 uv sync、uv lock、uv python install，也不创建 .venv。
    - 如果 uv 环境尚未初始化，报告缺失并等待我处理，不要回退到系统 Python。
-   - 报告 uv 版本、UV_BIN、UV_PROJECT_DIR，以及 uv run 实际解析的 Python 路径和版本。我的项目大多数会解析为 Python 3.14；以每个项目的真实声明和 uv 结果为准。
+   - 报告 uv 版本、项目环境是否已识别以及 uv run 实际解析的 Python 版本；UV_BIN、UV_PROJECT_DIR 和 Python 的完整路径只在任务内部保留。我的项目大多数会解析为 Python 3.14；以每个项目的真实声明和 uv 结果为准。
 8. 最后只报告：
-   - PROJECT_ROOT
-   - TEAM_MODE_SOURCE
+   - 当前项目是否已识别，不显示它的完整绝对路径
+   - TEAM_MODE_SOURCE 的逻辑位置 CODEX_HOME/sources/codex-team-mode，不显示完整绝对路径
+   - 来源状态：本次新克隆、此前已存在，或被冲突阻塞
    - remote
    - 候选完整 commit SHA
    - 工作区是否干净
    - spawn_agent 的真实字段
-   - uv 版本、UV_BIN 和 UV_PROJECT_DIR
-   - uv run 实际解析的 Python 路径和版本
+   - uv 版本，以及 UV_BIN 和 UV_PROJECT_DIR 是否已识别，不显示完整路径
+   - uv run 实际解析的 Python 版本，不显示完整解释器路径
    - 需要我审阅和确认的事项
 
 不要把检测到的 commit 自动视为我已经信任。等待我明确确认后再继续。
 ```
 
-这一步只允许在从 `PROJECT_ROOT` 确定的标准同级来源目录不存在时创建一次 Git clone，不允许修改业务项目，也不允许为了寻找旧克隆而扫描用户目录。检查输出中的 remote、完整 commit SHA 和工作区状态。只有你确实审阅并信任该 commit 后，才继续。
+这一步只允许在统一源码缓存 `CODEX_HOME/sources/codex-team-mode` 不存在时使用平台原生路径规则创建其缺失的父目录并执行一次 Git clone，不允许修改业务项目，也不允许为了寻找旧克隆而扫描用户目录。使用统一缓存可以让多个业务项目复用同一份受审阅来源，并避免嵌套 Git 仓库、业务仓库污染和重复克隆。检查输出中的来源状态、remote、完整 commit SHA 和工作区状态。只有你确实审阅并信任该 commit 后，才继续。
 
-第一步只有同时报告了非空的 `TEAM_MODE_SOURCE`、预期 remote、完整 commit SHA 和来源工作区状态，才算完成。如果任何一项是“未指定”或“未检查”，不要进入第二步；让 Codex 继续完成第一步的按需克隆或来源检查。项目根目录、uv 路径和 Python 版本可以复用已经确认的结果，不必重复定义。
+第一步只有同时报告了明确的来源状态、逻辑位置 `CODEX_HOME/sources/codex-team-mode`、预期 remote、完整 commit SHA 和来源工作区状态，才算完成。如果任何一项是“未指定”或“未检查”，不要进入第二步；让 Codex 继续完成第一步的按需克隆或来源检查。Codex 必须在任务内部保留 `PROJECT_ROOT`、`TEAM_MODE_SOURCE`、`UV_BIN` 和 `UV_PROJECT_DIR` 的真实绝对路径供下一步使用，但不需要把这些隐私路径显示出来。
 
 ### 第 2 步：确认 commit，只安装四个工作 Profile
 
-把上一条报告的真实值填入下面的消息。不得保留尖括号占位符。这里真正需要用户作出的安全决定只有一项：是否审阅并信任第一步报告的完整 commit SHA。`PROJECT_ROOT`、`TEAM_MODE_SOURCE`、`UV_BIN` 和 `UV_PROJECT_DIR` 都直接复制第一步的结果，不需要自行编造；四个 Agent 的名称、模型和指令来自已确认 commit，也不需要用户重新定义。
+这里只需要把第一步报告的完整 commit SHA 填入下面的消息。真正需要用户作出的安全决定只有一项：是否审阅并信任这个 commit。`PROJECT_ROOT`、`TEAM_MODE_SOURCE`、`UV_BIN` 和 `UV_PROJECT_DIR` 由 Codex 复用第一步在任务内部解析的真实值，不要求用户复制或暴露本地路径；四个 Agent 的名称、模型和指令来自已确认 commit，也不需要用户重新定义。
 
 ```text
 我已经审阅并信任下面这个 Team Mode 来源，允许开始第一阶段项目级安装。
-
-PROJECT_ROOT：
-<业务项目根目录绝对路径>
-
-TEAM_MODE_SOURCE：
-<Team Mode 来源仓库绝对路径>
 
 EXPECTED_TEAM_MODE_REMOTE：
 https://github.com/bvwl/codex-team-mode.git
@@ -163,11 +162,7 @@ https://github.com/bvwl/codex-team-mode.git
 EXPECTED_TEAM_MODE_COMMIT：
 <已经审阅并信任的完整 40 位 commit SHA>
 
-UV_BIN：
-<uv 可执行文件的绝对路径>
-
-UV_PROJECT_DIR：
-<包含 pyproject.toml 和 uv.lock 的项目目录绝对路径>
+复用第一步在当前任务内部解析的 PROJECT_ROOT、TEAM_MODE_SOURCE、UV_BIN 和 UV_PROJECT_DIR，不要让我重新填写，也不要在回复中显示它们的完整绝对路径。如果当前任务没有保留其中任何一个值，停止安装并重新执行第一步，不要猜测路径。
 
 第一阶段只安装四个工作 Profile：
 - Explorer
@@ -227,20 +222,13 @@ UV_PROJECT_DIR：
 ```text
 四个 Team Mode 工作 Profile 已通过当前任务的运行时选择验证。现在执行第二阶段安装。
 
-TEAM_MODE_SOURCE：
-<Team Mode 来源仓库绝对路径>
-
 EXPECTED_TEAM_MODE_REMOTE：
 https://github.com/bvwl/codex-team-mode.git
 
 EXPECTED_TEAM_MODE_COMMIT：
 <已经审阅并信任的完整 40 位 commit SHA>
 
-UV_BIN：
-<uv 可执行文件的绝对路径>
-
-UV_PROJECT_DIR：
-<包含 pyproject.toml 和 uv.lock 的项目目录绝对路径>
+在内部重新识别 PROJECT_ROOT、UV_BIN 和 UV_PROJECT_DIR，并把 TEAM_MODE_SOURCE 解析为 CODEX_HOME/sources/codex-team-mode。该来源必须已经存在；本阶段不 clone、不 pull、不 checkout、不 reset。不要让我填写本地路径，也不要在回复中显示完整绝对路径。任一值无法可靠解析时停止安装。
 
 只允许安装：
 1. EXPECTED_TEAM_MODE_COMMIT 中的 agents/default.toml
@@ -383,13 +371,13 @@ UV_PROJECT_DIR：
 
 1. 当前 Codex 工作目录是目标项目根目录。Git 仓库以仓库根目录为准；非 Git 项目使用用户明确指定的项目目录，不因为缺少 `.git` 自动拒绝接入。
 2. 目标项目已经被 Codex 标记为可信；不可信项目可能忽略项目级 `.codex/` 配置。如果当前客户端无法确认或设置可信状态，停止并让用户在客户端中完成信任确认。
-3. 可以访问 Team Mode 源仓库：
+3. 可以访问 Team Mode 的统一源码缓存：
 
    ```text
-   <从 PROJECT_ROOT 推导并报告的同级 codex-team-mode-source 绝对路径>
+   CODEX_HOME/sources/codex-team-mode
    ```
 
-   或 GitHub：
+   它位于 Codex 配置根目录中，不属于业务项目。若该路径不存在，按“第 1 步”从 GitHub 自动克隆；若已存在，只读核对，不自动更新。来源 GitHub 为：
 
    ```text
    https://github.com/bvwl/codex-team-mode
@@ -655,30 +643,61 @@ UV_BIN：
 
 这段提示词只在统一写入门禁的阻塞项数量为零时授权写入当前项目内的 Skill 和 Profile。源仓库不可信、项目未受信任、缺少明确 Profile 选择器、参数仍是占位符、Python 不兼容或同名内容不同时，都必须保持零写入并一次性报告全部阻塞项，不能自行覆盖或只安装 `default.toml`。`AGENTS.md` 是下一步独立配置，不属于 `manage_profiles.py` 的安装结果。
 
-## 另一台机器：先从 GitHub 获取源仓库
+## 另一台机器：自动准备统一源码缓存
 
-如果目标机器没有本地 Team Mode 源仓库，先把你的 fork 克隆到一个明确目录：
+在另一台机器上也使用 `CODEX_HOME/sources/codex-team-mode`，不要把来源仓库克隆进业务项目。推荐直接使用前面的“第 1 步”自然语言提示词：目标不存在时自动创建缺失的 `CODEX_HOME/sources` 并克隆，目标已存在时只读检查。提示词中的逻辑位置不依赖操作系统；执行时必须转换成平台原生绝对路径。
+
+如果需要在 macOS 或 Linux 上手工执行，对应命令是：
 
 ```bash
-git clone https://github.com/bvwl/codex-team-mode.git /absolute/path/to/codex-team-mode
+team_mode_codex_home="${CODEX_HOME:-$HOME/.codex}"
+mkdir -p "$team_mode_codex_home/sources"
+git clone https://github.com/bvwl/codex-team-mode.git "$team_mode_codex_home/sources/codex-team-mode"
+team_mode_source="$team_mode_codex_home/sources/codex-team-mode"
 ```
 
-不要在未审阅的浮动 `main` 上直接执行安装脚本。进入检出后，先核对：
+如果需要在 Windows PowerShell 上手工执行，对应命令是：
+
+```powershell
+$TeamModeCodexHome = if ($env:CODEX_HOME) {
+    $env:CODEX_HOME
+} else {
+    Join-Path $env:USERPROFILE ".codex"
+}
+$TeamModeSources = Join-Path $TeamModeCodexHome "sources"
+$TeamModeSource = Join-Path $TeamModeSources "codex-team-mode"
+New-Item -ItemType Directory -Path $TeamModeSources -Force | Out-Null
+git clone https://github.com/bvwl/codex-team-mode.git $TeamModeSource
+```
+
+以上命令仅用于目标确实不存在的首次克隆；如果目标已存在，不要再次运行 `git clone` 或用 `New-Item -Force` 处理目标仓库。自动流程在创建任何内容前还必须执行前述冲突检查。
+
+不要在未审阅的浮动 `main` 上直接执行安装脚本。进入检出后，macOS/Linux 可以这样核对：
 
 ```bash
-git -C /absolute/path/to/codex-team-mode remote get-url origin
-git -C /absolute/path/to/codex-team-mode rev-parse --verify HEAD
-git -C /absolute/path/to/codex-team-mode status --porcelain=v1 --untracked-files=all
-git -C /absolute/path/to/codex-team-mode ls-files --others --ignored --exclude-standard -- scripts agents
-git -C /absolute/path/to/codex-team-mode ls-files --others --ignored --exclude-standard -- skills/team-mode
+git -C "$team_mode_source" remote get-url origin
+git -C "$team_mode_source" rev-parse --verify HEAD
+git -C "$team_mode_source" status --porcelain=v1 --untracked-files=all
+git -C "$team_mode_source" ls-files --others --ignored --exclude-standard -- scripts agents
+git -C "$team_mode_source" ls-files --others --ignored --exclude-standard -- skills/team-mode
+```
+
+Windows PowerShell 使用同样的 Git 参数，只把路径变量写成 `$TeamModeSource`：
+
+```powershell
+git -C $TeamModeSource remote get-url origin
+git -C $TeamModeSource rev-parse --verify HEAD
+git -C $TeamModeSource status --porcelain=v1 --untracked-files=all
+git -C $TeamModeSource ls-files --others --ignored --exclude-standard -- scripts agents
+git -C $TeamModeSource ls-files --others --ignored --exclude-standard -- skills/team-mode
 ```
 
 工作区状态和 `scripts agents` 的额外文件检查必须没有输出。最后一个命令用于列出 Skill 工作树缓存；它允许有输出，但这些路径不得安装。审阅该 commit 中的整个 `skills/team-mode/`、`scripts/manage_profiles.py` 和 `agents/*.toml`。记录完整 commit SHA；后续安装始终把它作为 `EXPECTED_TEAM_MODE_COMMIT`，不要只写分支名或短 SHA。若要升级，先审阅新 commit，再更新期望值。
 
-然后使用上一节的“一次性安装提示词”，把 `TEAM_MODE_SOURCE` 改为：
+然后使用上一节的“一次性安装提示词”，把 `TEAM_MODE_SOURCE` 指向内部解析后的统一缓存路径。公开文档和普通报告中只需写：
 
 ```text
-/absolute/path/to/codex-team-mode
+CODEX_HOME/sources/codex-team-mode
 ```
 
 也可以先在目标项目根目录尝试安装 Skill：
