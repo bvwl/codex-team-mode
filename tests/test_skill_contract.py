@@ -39,7 +39,9 @@ class TeamModeSkillContractTests(unittest.TestCase):
         reference = (ROOT / "skills" / "team-mode" / "references" / "custom-agents.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("Current Codex releases enable subagent workflows by default", reference)
+        self.assertIn("Use capability detection, not a remembered minimum Codex version", reference)
+        self.assertIn("real `spawn_agent` input schema", reference)
+        self.assertIn("require the field to select all four working profile names", reference)
         self.assertIn("max_depth = 1", reference)
         self.assertIn("actual runtime trace", reference)
         self.assertIn("four working profiles plus one fail-closed `default` guard", reference)
@@ -69,6 +71,69 @@ class TeamModeSkillContractTests(unittest.TestCase):
                 self.assertIn("scripts/manage_profiles.py --scope project", readme)
                 self.assertIn("--audit-routing", readme)
                 self.assertNotIn("python3.11 scripts/", readme)
+                self.assertIn("bvwl/codex-team-mode", readme)
+                self.assertIn("docs/PROJECT_INTEGRATION.zh-CN.md", readme)
+
+    def test_project_integration_guide_covers_install_verify_and_usage(self) -> None:
+        guide = (ROOT / "docs" / "PROJECT_INTEGRATION.zh-CN.md").read_text(encoding="utf-8")
+        for heading in (
+            "## 自然语言接入流程：从 GitHub 到开始提需求",
+            "## 高级方式：从本地仓库一次性接入",
+            "## 为目标项目生成 AGENTS.md",
+            "## 重启后验证 Skill 和 Agent",
+            "## 全栈开发提示词",
+            "## 逆向分析提示词",
+            "## 更新已接入的 Team Mode",
+            "## 故障排查",
+            "## 最终检查清单",
+        ):
+            with self.subTest(heading=heading):
+                self.assertIn(heading, guide)
+        self.assertIn(".agents/skills/team-mode", guide)
+        self.assertIn(".codex/agents", guide)
+        self.assertIn("manage_profiles.py", guide)
+        self.assertIn("--audit-routing", guide)
+        self.assertIn("https://github.com/bvwl/codex-team-mode", guide)
+        self.assertIn("## 兼容性与能力预检", guide)
+        self.assertIn("EXPECTED_TEAM_MODE_COMMIT", guide)
+        self.assertIn("UV_PROJECT_DIR", guide)
+        self.assertIn("UV_BIN", guide)
+        self.assertIn("多数项目可以由 uv 解析为 Python 3.14", guide)
+        self.assertIn("uv python install 3.14", guide)
+        self.assertIn("uv init myproject", guide)
+        self.assertIn("uv python pin 3.14", guide)
+        self.assertIn("uv venv", guide)
+        self.assertIn("uv add --dev <package>", guide)
+        self.assertIn("不手工编辑 `uv.lock`", guide)
+        self.assertIn("不运行 uv sync、uv lock、uv python install", guide)
+        self.assertIn("不要回退到无关的系统 Python", guide)
+        self.assertIn("第 1 步：让 Codex 从 GitHub 准备并审阅来源", guide)
+        self.assertIn("PROJECT_ROOT 的同级目录 codex-team-mode-source", guide)
+        self.assertIn("不扫描、搜索或列出其他用户目录", guide)
+        self.assertIn("不存在：我授权你只在这个精确路径执行一次 git clone", guide)
+        self.assertIn("如果任何一项是“未指定”或“未检查”", guide)
+        self.assertIn("真正需要用户作出的安全决定只有一项", guide)
+        self.assertIn("第 2 步：确认 commit，只安装四个工作 Profile", guide)
+        self.assertIn("第 4 步：安装 `default` 哨兵和 Team Mode Skill", guide)
+        self.assertIn("第 6 步：让 Team Mode 先分析现有项目", guide)
+        self.assertIn("第 7 步：用自然语言提出真正的开发需求", guide)
+        self.assertIn("不安装 default.toml", guide)
+        self.assertIn("不得把尖括号占位符原样发送", guide)
+        self.assertIn("显式自定义 Profile 选择契约", guide)
+        self.assertIn("执行统一写入门禁", guide)
+        self.assertIn("最后一次性汇总全部阻塞项", guide)
+        self.assertIn("git status --porcelain=v1 --untracked-files=all 必须为空", guide)
+        self.assertIn("git ls-files --others --ignored --exclude-standard", guide)
+        self.assertIn("当前任务暴露的工具 Schema", guide)
+        self.assertIn("导入 sys、argparse、json、pathlib 和 tomllib", guide)
+        self.assertIn("使用 lstat 语义", guide)
+        self.assertIn("普通文件的 SHA-256", guide)
+        self.assertIn("### 安装中途失败或只完成一部分", guide)
+        self.assertIn("本提示词不自动创建 AGENTS.md", guide)
+        self.assertIn("$CODEX_HOME/sessions", guide)
+        self.assertIn("操作系统级只读容器/沙箱", guide)
+        self.assertNotIn("/Users/", guide)
+        self.assertNotIn("python3.11 scripts/", guide)
 
 
 if __name__ == "__main__":

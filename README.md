@@ -46,10 +46,12 @@ Casual conversation, simple lookups, and tasks whose coordination cost exceeds t
 
 The repository management script and full test suite require Python 3.11 or newer. Use the active environment's interpreter: `python` in an activated virtual environment or usually `python3` otherwise. A binary named exactly `python3.11` is not required.
 
+For a complete project-scoped setup using copyable natural-language prompts, see the [Chinese project integration guide](./docs/PROJECT_INTEGRATION.zh-CN.md).
+
 Install the Skill:
 
 ```bash
-npx skills add oil-oil/codex-team-mode
+npx skills add bvwl/codex-team-mode
 ```
 
 The four working Agent profiles and the default-on `default` dispatch guard are separate from the Skill. Copy the five TOML templates in [`agents/`](./agents) to `~/.codex/agents/` for personal use or `<repository>/.codex/agents/` for one project. Onboarding runs only for first setup, missing profiles, or explicit repair and verification requests.
@@ -57,9 +59,9 @@ The four working Agent profiles and the default-on `default` dispatch guard are 
 When working from this repository, run a no-write preflight before explicitly installing:
 
 ```bash
-python3 scripts/manage_profiles.py --scope project
-python3 scripts/manage_profiles.py --scope project --apply
-python3 scripts/manage_profiles.py --scope project --verify
+python3 -I scripts/manage_profiles.py --scope project
+python3 -I scripts/manage_profiles.py --scope project --apply
+python3 -I scripts/manage_profiles.py --scope project --verify
 ```
 
 Replace `project` with `personal` for a personal installation. The tool never overwrites a same-named file with different content; any conflict stops the installation before a profile is written.
@@ -95,6 +97,7 @@ You can change `model` and `model_reasoning_effort` in `agents/*.toml`. Preserve
 codex-team-mode/
 ├── agents/                  # Four working profiles plus one dispatch guard
 ├── assets/readme/           # GitHub-safe SVG visuals
+├── docs/                    # Project integration and usage guides
 ├── skills/team-mode/        # Installable Skill
 │   ├── agents/openai.yaml
 │   ├── references/         # Profile manifest, setup, and evaluation guidance

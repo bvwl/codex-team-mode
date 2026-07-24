@@ -46,10 +46,12 @@ TOML 里的 sandbox 是 profile 默认值，不是绝对隔离边界；父线程
 
 本仓库的管理脚本和完整测试要求 Python 3.11 或更高版本。使用当前环境的解释器即可；已激活虚拟环境时使用 `python`，否则通常使用 `python3`，不要求系统存在名为 `python3.11` 的命令。
 
+需要把 Skill 和 Agent Profile 接入其他现有项目时，请直接使用[完整项目接入与自然语言配置指南](./docs/PROJECT_INTEGRATION.zh-CN.md)。
+
 先安装 Skill：
 
 ```bash
-npx skills add oil-oil/codex-team-mode
+npx skills add bvwl/codex-team-mode
 ```
 
 四个工作 Agent 配置和默认开启的 `default` 派发哨兵与 Skill 分开安装。个人使用时，把 [`agents/`](./agents) 里的五个 TOML 模板复制到 `~/.codex/agents/`；只给单个项目使用时，复制到 `<repository>/.codex/agents/`。onboarding 只在首次配置、Profile 缺失，或用户明确要求修复与验证时运行一次。
@@ -57,9 +59,9 @@ npx skills add oil-oil/codex-team-mode
 从本仓库安装时，可以先进行不会写文件的安全预检，再显式安装：
 
 ```bash
-python3 scripts/manage_profiles.py --scope project
-python3 scripts/manage_profiles.py --scope project --apply
-python3 scripts/manage_profiles.py --scope project --verify
+python3 -I scripts/manage_profiles.py --scope project
+python3 -I scripts/manage_profiles.py --scope project --apply
+python3 -I scripts/manage_profiles.py --scope project --verify
 ```
 
 个人安装时把 `project` 换成 `personal`。工具不会覆盖内容不同的同名文件；遇到冲突会停止，并且不写入任何 Profile。
@@ -95,6 +97,7 @@ python3 skills/team-mode/scripts/usage_by_model.py \
 codex-team-mode/
 ├── agents/                  # 四个工作 Agent 与一个派发哨兵
 ├── assets/readme/           # GitHub-safe SVG 视觉素材
+├── docs/                    # 项目接入与使用指南
 ├── skills/team-mode/        # 可以安装的 Skill
 │   ├── agents/openai.yaml
 │   ├── references/         # Profile 清单、Agent 配置与评估方法

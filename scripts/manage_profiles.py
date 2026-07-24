@@ -51,6 +51,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, dict[str, Any]]:
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"Profile manifest must be a regular file, not a symlink: {path}")
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("schema_version") != 1 or not isinstance(data.get("profiles"), dict):
         raise ValueError(f"Unsupported or malformed profile manifest: {path}")
@@ -116,8 +118,24 @@ def validate_sources(
     profiles: dict[str, dict[str, Any]], source_dir: Path = SOURCE_DIR
 ) -> list[str]:
     errors: list[str] = []
+    if source_dir.is_symlink() or not source_dir.is_dir():
+        return [f"{source_dir}: source directory must be a real directory, not a symlink"]
     for name, expected in profiles.items():
-        errors.extend(validate_profile(source_dir / expected["filename"], name, expected))
+        source = source_dir / expected["filename"]
+        if source.is_symlink() or not source.is_file():
+            errors.append(f"{source}: source profile must be a regular file, not a symlink")
+            continue
+        errors.extend(validate_profile(source, name, expected))
+    return errors
+
+
+def validate_destination_path(destination: Path) -> list[str]:
+    errors: list[str] = []
+    for path in (destination.parent, destination):
+        if path.is_symlink():
+            errors.append(f"{path}: destination path must not be a symlink")
+        elif path.exists() and not path.is_dir():
+            errors.append(f"{path}: destination path must be a directory")
     return errors
 
 
@@ -130,7 +148,9 @@ def classify_destination(
     for name, expected in profiles.items():
         source = source_dir / expected["filename"]
         target = destination / expected["filename"]
-        if not target.exists():
+        if target.is_symlink():
+            status = "conflict"
+        elif not target.exists():
             status = "missing"
         elif not target.is_file():
             status = "conflict"
@@ -148,6 +168,9 @@ def verify_destination(
     errors: list[str] = []
     for name, expected in profiles.items():
         target = destination / expected["filename"]
+        if target.is_symlink():
+            errors.append(f"{target}: profile must be a regular file, not a symlink")
+            continue
         if not target.is_file():
             errors.append(f"{target}: profile is missing")
             continue
@@ -156,6 +179,9 @@ def verify_destination(
 
 
 def install_missing(entries: list[tuple[str, str, Path, Path]], destination: Path) -> None:
+    destination_errors = validate_destination_path(destination)
+    if destination_errors:
+        raise ValueError("; ".join(destination_errors))
     destination.mkdir(parents=True, exist_ok=True)
     for _, status, source, target in entries:
         if status != "missing":
@@ -180,6 +206,13 @@ def main() -> int:
         return 2
 
     destination = destination_for(args)
+    destination_errors = validate_destination_path(destination)
+    if destination_errors:
+        print("Unsafe profile destination:", file=sys.stderr)
+        for error in destination_errors:
+            print(f"- {error}", file=sys.stderr)
+        return 2
+
     if args.verify:
         errors = verify_destination(profiles, destination)
         if errors:

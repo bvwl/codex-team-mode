@@ -10,9 +10,9 @@ Run onboarding only for a first installation, a missing or mismatched profile, a
 
 ## Confirm Runtime Availability
 
-Current Codex releases enable subagent workflows by default. Custom profile selection still requires a runtime whose `spawn_agent` tool exposes `agent_type`; the tool surface in the active task is stronger evidence than a remembered feature flag.
+Use capability detection, not a remembered minimum Codex version. Client, release channel, and workspace rollout can affect the live tool surface. Before writing configuration, inspect the current task's real `spawn_agent` input schema and require an `agent_type` field. Record `codex --version` when available, but never treat the version string, a profile file on disk, `task_name`, or an Agent's self-report as proof of compatibility.
 
-If `agent_type` is missing, update or restart Codex and open a new task before testing again. Do not enable an undocumented or stale feature flag from memory. See the current [Codex subagent manual](https://learn.chatgpt.com/docs/agent-configuration/subagents.md).
+Before installation, the field's existence is the compatibility gate; project profile names may not be selectable yet. After installation and a new task, require the field to select all four working profile names. If `agent_type` is missing, update or restart Codex and open a new task before testing again. Do not enable an undocumented or stale feature flag from memory. See the current [Codex subagent manual](https://learn.chatgpt.com/docs/agent-configuration/subagents.md).
 
 When spawning, pass the exact working profile name through `agent_type`. `task_name` only labels the child thread and never selects a profile. Never omit `agent_type` or pass `default` during normal routing. Do not substitute a generic child named `explorer`, `executor`, or `reviewer` when the intended custom profile is unavailable.
 
@@ -34,7 +34,7 @@ The guard is not a fifth working role. Codex selects it only when the parent omi
 
 These model IDs are repository defaults verified in the intended installation. Terra High is the default substantial executor because the main thread retains architecture decisions and final acceptance; Sol High remains the independent review tier for concrete consequential risks. If a configured model is unavailable, ask before substituting another model, preserve the role boundary, and verify the actual runtime trace after the change.
 
-Use the canonical templates in the repository's [`agents`](https://github.com/oil-oil/codex-team-mode/tree/main/agents) directory. Do not duplicate or rewrite their developer instructions from memory.
+Use the canonical templates in the repository's [`agents`](https://github.com/bvwl/codex-team-mode/tree/main/agents) directory. Do not duplicate or rewrite their developer instructions from memory.
 
 ## Choose The Scope
 
@@ -65,7 +65,7 @@ Current Codex releases default `agents.max_depth` to `1`; keep that default unle
 ## Install Or Repair
 
 1. Confirm that the user has authorized writing personal or project Codex configuration. Do not silently create global profiles just because a substantial task triggered the Skill.
-2. When working from the repository, use the active Python 3.11-or-newer interpreter to run `python3 scripts/manage_profiles.py --scope project` or `--scope personal` as a no-write preflight; use `python` instead when a compatible virtual environment is active. Do not require a binary named exactly `python3.11`. Inspect every reported destination and conflict.
+2. When working from the repository, use the active Python 3.11-or-newer interpreter. With that same interpreter in isolated mode, first import `sys`, `argparse`, `json`, `pathlib`, and `tomllib`; these scripts require no third-party packages. Then run `python3 -I scripts/manage_profiles.py --scope project` or `--scope personal` as a no-write preflight, using `python` instead when a compatible virtual environment is active. `-I` prevents the target project, `PYTHONPATH`, or user site-packages from shadowing standard-library imports. Do not require a binary named exactly `python3.11`. Inspect every reported destination and conflict.
 3. After authorization, repeat the command with `--apply`. The manager installs only missing files and stops before writing when any same-named destination differs. For a manual installation, apply the same preflight and never overwrite user changes.
 4. Parse every file with Python `tomllib` or an equivalent TOML parser. Confirm that each contains `name`, `description`, and `developer_instructions`, plus the intended model, reasoning effort, and sandbox mode.
 5. Run the manager again with `--verify`, then report the final path and role-to-model mapping. Explain that a personal `default.toml` affects omitted/default subagent dispatches across the user's Codex tasks, while a project-scoped guard affects only that trusted project configuration scope.
